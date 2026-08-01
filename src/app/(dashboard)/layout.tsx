@@ -313,7 +313,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
       {/* Main content */}
       <main className="flex-1 flex flex-col overflow-hidden bg-[var(--background)]" suppressHydrationWarning>
         {/* Top Header Bar */}
-        <header className="border-b border-white/[0.06] px-6 py-3 flex items-center justify-between bg-[var(--surface-1)] backdrop-blur-xl relative z-30" suppressHydrationWarning>
+        <header className="border-b border-white/[0.06] px-6 py-3 flex items-center justify-between bg-[var(--surface-1)] backdrop-blur-xl relative z-[60]" suppressHydrationWarning>
           <div className="flex items-center gap-4" suppressHydrationWarning>
             <button
               className={`text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-white/5 ${desktopSidebarOpen ? 'lg:hidden' : 'lg:block'}`}

@@ -771,7 +771,7 @@ export default function SingleNotePage({ params }: { params: Promise<{ id: strin
       <div className="absolute bottom-0 left-0 w-96 h-96 bg-cyan-500/10 rounded-full blur-3xl pointer-events-none" />
 
       {/* TOP HEADER */}
-      <div className="flex items-center justify-between bg-gradient-to-r from-white/[0.01] to-white/[0.03] backdrop-blur-xl border border-white/[0.05] p-3.5 rounded-[20px] relative z-50 mb-4 shadow-sm">
+      <div className="flex items-center justify-between bg-gradient-to-r from-white/[0.01] to-white/[0.03] backdrop-blur-xl border border-white/[0.05] p-3.5 rounded-[20px] relative z-20 mb-4 shadow-sm">
         <div className="flex items-center gap-4">
           <button 
             onClick={() => router.push('/dashboard')}
