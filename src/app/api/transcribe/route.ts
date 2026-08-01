@@ -104,7 +104,7 @@ export async function POST(request: NextRequest) {
         const savedFileName = `${noteId}.${ext}`
         const filePath = path.join(uploadDir, savedFileName)
         fs.writeFileSync(filePath, buffer)
-        savedAudioUrl = `/uploads/${savedFileName}`
+        savedAudioUrl = `/api/audio/${savedFileName}`
       } catch (error: unknown) {
         console.warn('Failed to save audio file locally:', getErrorMessage(error, 'unknown file save error'))
       }
