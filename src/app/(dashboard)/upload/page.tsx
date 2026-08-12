@@ -109,7 +109,8 @@ export default function UploadPage() {
       
       if (!transcribeRes.ok) {
         const errData = await transcribeRes.json().catch(() => ({}))
-        throw new Error(errData.error || `Failed to transcribe file (${transcribeRes.status})`)
+        // Use human-readable message when available (e.g. API_LIMIT_REACHED returns { error, message })
+        throw new Error(errData.message || errData.error || `Failed to transcribe file (${transcribeRes.status})`)
       }
       const transcribeData = await transcribeRes.json()
       setTranscript(transcribeData.text || '')
@@ -212,21 +213,31 @@ export default function UploadPage() {
         <div className="rounded-2xl border border-rose-500/30 bg-rose-950/40 backdrop-blur-xl p-5 text-center space-y-3 shadow-lg animate-fade-in">
           <div className="flex items-center justify-center gap-2 text-rose-400 font-bold text-base">
             <span>⚠️</span>
-            <span>API Limit Reached</span>
+            <span>{errorMsg.toLowerCase().includes('quota') || errorMsg.toLowerCase().includes('api key') || errorMsg.toLowerCase().includes('limit') ? 'API Limit Reached' : 'Transcription Failed'}</span>
           </div>
           <p className="text-xs text-slate-300 max-w-md mx-auto leading-relaxed">
-            {errorMsg.includes('limit') || errorMsg.includes('API') || errorMsg.includes('429') || errorMsg.includes('লিমিট')
-              ? 'Daily free AI quota exhausted. Please add a new API key in Settings.'
-              : errorMsg}
+            {errorMsg}
           </p>
-          <div className="pt-1 flex justify-center">
-            <Link
-              href="/settings"
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:opacity-90 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5"
-            >
-              ⚙️ Go to Settings →
-            </Link>
-          </div>
+          {(errorMsg.toLowerCase().includes('quota') || errorMsg.toLowerCase().includes('api key') || errorMsg.toLowerCase().includes('limit') || errorMsg.toLowerCase().includes('key')) && (
+            <div className="pt-1 flex justify-center">
+              <Link
+                href="/settings"
+                className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:opacity-90 text-white font-bold text-xs shadow-md transition-all flex items-center gap-1.5"
+              >
+                ⚙️ Go to Settings →
+              </Link>
+            </div>
+          )}
+          {!(errorMsg.toLowerCase().includes('quota') || errorMsg.toLowerCase().includes('api key') || errorMsg.toLowerCase().includes('limit') || errorMsg.toLowerCase().includes('key')) && (
+            <div className="pt-1 flex justify-center">
+              <button
+                onClick={() => { setErrorMsg(''); setStatus('idle'); }}
+                className="px-5 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 text-slate-300 font-bold text-xs shadow-md transition-all"
+              >
+                Try Again
+              </button>
+            </div>
+          )}
         </div>
       )}
 

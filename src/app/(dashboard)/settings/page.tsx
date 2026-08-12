@@ -285,7 +285,17 @@ export default function SettingsPage() {
                   {groqKey ? 'Active' : 'Optional'}
                 </span>
               </div>
-              <p className="text-[11px] text-slate-400">Powers ultra-fast Whisper speech-to-text backup.</p>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] text-slate-400">Required for audio transcription (Whisper speech-to-text).</p>
+                <a 
+                  href="https://console.groq.com/keys" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-[10px] font-bold text-amber-400 hover:text-amber-300 underline underline-offset-2 shrink-0 transition-colors"
+                >
+                  Get free key →
+                </a>
+              </div>
               <input 
                 type="password" 
                 value={groqKey}
