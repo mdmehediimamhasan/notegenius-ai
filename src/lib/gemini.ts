@@ -105,51 +105,96 @@ async function callGroqLLM(apiKey: string, prompt: string, isJson: boolean = fal
   const jsonSuffix = isJson ? '\n\nGenerate valid JSON based on above.' : ''
   const safePrompt = prompt.length > 5000 ? prompt.substring(0, 5000) + jsonSuffix : prompt
 
-  try {
-    const res = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: safePrompt }],
-      model: 'llama-3.1-8b-instant',
-    })
-    return res.choices[0]?.message?.content || ''
-  } catch (err: any) {
-    const tightPrompt = prompt.length > 3000 ? prompt.substring(0, 3000) + jsonSuffix : prompt
-    const res = await groq.chat.completions.create({
-      messages: [{ role: 'user', content: tightPrompt }],
-      model: 'llama-3.3-70b-versatile',
-    })
-    return res.choices[0]?.message?.content || ''
+  // Models supported by Groq in order of priority
+  const groqModels = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'qwen/qwen3.6-27b', 'groq/compound', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant']
+  
+  for (const model of groqModels) {
+    try {
+      const res = await groq.chat.completions.create({
+        messages: [{ role: 'user', content: safePrompt }],
+        model,
+        ...(isJson ? { response_format: { type: 'json_object' } } : {})
+      })
+      const content = res.choices[0]?.message?.content
+      if (content && content.trim().length > 0) {
+        return content
+      }
+    } catch (err: any) {
+      console.warn(`Groq model ${model} failed:`, err?.message || err)
+    }
   }
+  return ''
 }
 
 async function callMistralLLM(apiKey: string, messages: any[], isJson: boolean = false) {
-  const body: any = {
-    model: 'mistral-large-latest',
-    messages: messages
-  }
-  if (isJson) {
-    body.response_format = { type: 'json_object' }
-  }
+  // Try mistral-small-latest first (widely supported on free & paid tiers), then fallbacks
+  const mistralModels = ['mistral-small-latest', 'open-mistral-7b', 'mistral-large-latest', 'codestral-latest', 'open-mixtral-8x7b']
+  
+  for (const model of mistralModels) {
+    try {
+      const body: any = {
+        model,
+        messages: messages
+      }
+      if (isJson) {
+        body.response_format = { type: 'json_object' }
+      }
 
-  const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`
-    },
-    body: JSON.stringify(body)
-  })
+      const res = await fetch('https://api.mistral.ai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify(body)
+      })
 
-  if (!res.ok) {
-    const errorText = await res.text()
-    throw new Error(`Mistral API Error (${res.status}): ${errorText}`)
+      if (res.ok) {
+        const data = await res.json()
+        const content = data.choices?.[0]?.message?.content
+        if (content && content.trim().length > 0) {
+          return content
+        }
+      } else {
+        const errText = await res.text()
+        console.warn(`Mistral model ${model} failed (${res.status}):`, errText)
+      }
+    } catch (err: any) {
+      console.warn(`Mistral model ${model} error:`, err?.message || err)
+    }
   }
+  throw new Error('All Mistral models failed')
+}
 
-  const data = await res.json()
-  return data.choices?.[0]?.message?.content || ''
+async function callGeminiLLM(apiKey: string, prompt: string) {
+  const geminiModels = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
+  const genAI = new GoogleGenerativeAI(apiKey)
+  
+  for (const modelName of geminiModels) {
+    try {
+      const model = genAI.getGenerativeModel({ model: modelName })
+      const result = await model.generateContent(prompt)
+      const text = result.response.text()
+      if (text && text.trim().length > 0) {
+        return { text: text.trim(), modelName: `Google Gemini (${modelName})` }
+      }
+    } catch (err: any) {
+      console.warn(`Gemini model ${modelName} failed:`, err?.message || err)
+    }
+  }
+  return null
 }
 
 async function callOpenRouterLLM(apiKey: string, messages: any[], isJson: boolean = false) {
-  const openRouterModels = ['meta-llama/llama-3.3-70b-instruct:free', 'deepseek/deepseek-r1:free', 'google/gemma-2-9b-it:free']
+  const openRouterModels = [
+    'inclusionai/ling-3.0-flash-fin:free',
+    'nvidia/nemotron-3.5-lightning:free',
+    'liquid/lfm-2.5-2.6b:free',
+    'meta-llama/llama-3.3-70b-instruct:free',
+    'meta-llama/llama-3.3-70b-instruct',
+    'deepseek/deepseek-r1:free',
+    'google/gemma-2-9b-it:free'
+  ]
   for (const model of openRouterModels) {
     try {
       const res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -248,23 +293,36 @@ Formatting Rules:
   if (activeMistralKey) {
     try {
       text = await callMistralLLM(activeMistralKey, [{ role: 'user', content: prompt }], false)
-      if (text) generatedBy = 'Mistral AI (Mistral Large)'
+      if (text) generatedBy = 'Mistral AI (Mistral Small)'
     } catch (err: any) {
-      console.warn('Mistral generateNotes failed, trying Groq fallback:', err?.message || err)
+      console.warn('Mistral generateNotes failed, trying Gemini/Groq fallback:', err?.message || err)
     }
   }
 
-  // 2. Try Groq fallback
+  // 2. Try Gemini fallback
+  if (!text && activeGeminiKey) {
+    try {
+      const geminiResult = await callGeminiLLM(activeGeminiKey, prompt)
+      if (geminiResult?.text) {
+        text = geminiResult.text
+        generatedBy = geminiResult.modelName
+      }
+    } catch (err: any) {
+      console.warn('Gemini generateNotes failed:', err?.message || err)
+    }
+  }
+
+  // 3. Try Groq fallback
   if (!text && activeGroqKey) {
     try {
       text = await callGroqLLM(activeGroqKey, prompt, false)
-      if (text) generatedBy = 'Groq (LLaMA 3.3 70B)'
+      if (text) generatedBy = 'Groq (GPT-OSS)'
     } catch (groqErr: any) {
       console.warn('Groq LLM fallback failed:', groqErr?.message || groqErr)
     }
   }
 
-  // 3. Try OpenRouter fallback
+  // 4. Try OpenRouter fallback
   if (!text && activeOpenRouterKey) {
     try {
       const openRouterResult = await callOpenRouterLLM(activeOpenRouterKey, [{ role: 'user', content: prompt }], false)
@@ -277,21 +335,11 @@ Formatting Rules:
     }
   }
 
-  // 4. Try Gemini fallback
-  if (!text && activeGeminiKey) {
-    try {
-      const genAI = new GoogleGenerativeAI(activeGeminiKey)
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-      const result = await model.generateContent(prompt)
-      text = result.response.text()
-      if (text) generatedBy = 'Google Gemini (Gemini 2.0 Flash)'
-    } catch (err: any) {
-      console.warn('Gemini generateNotes failed:', err?.message || err)
-    }
-  }
-
+  // Fallback: If all LLMs failed, construct structured markdown from transcript
   if (!text) {
-    return { markdownContent: '', title: noteTitle || 'Audio Note', generatedBy: 'Fallback AI' }
+    const rawFallback = buildNotesFromTranscript(transcript, noteTitle)
+    text = `# ${rawFallback.title}\n\n## Overview\n${rawFallback.summary || 'Transcript summary.'}\n\n## Key Takeaways\n${rawFallback.keyPoints.map(k => `- ${k}`).join('\n')}\n\n## Detailed Notes\n${rawFallback.detailedNotes.map(d => `### ${d.heading}\n${d.content}`).join('\n\n')}\n\n## Action Items\n${rawFallback.actionItems.map(a => `- ${a}`).join('\n') || '- No specific action items identified.'}`
+    generatedBy = 'Smart Note Engine (Fallback)'
   }
 
   // Extract a title from the markdown if possible
@@ -348,11 +396,9 @@ ${formattedNotes}
   // 2. Try Gemini
   if (activeGeminiKey) {
     try {
-      const genAI = new GoogleGenerativeAI(activeGeminiKey)
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
       const fullPrompt = `${systemWithNotes}\n\nUser: ${userMessage}\nAssistant:`
-      const result = await model.generateContent(fullPrompt)
-      return result.response.text()
+      const geminiResult = await callGeminiLLM(activeGeminiKey, fullPrompt)
+      if (geminiResult?.text) return geminiResult.text
     } catch (err: any) {
       console.warn('Gemini chat failed, trying Groq:', err?.message || err)
     }
@@ -362,7 +408,8 @@ ${formattedNotes}
   if (activeGroqKey) {
     try {
       const fullPrompt = `${systemWithNotes}\n\nUser: ${userMessage}\nAssistant:`
-      return await callGroqLLM(activeGroqKey, fullPrompt, false)
+      const groqRes = await callGroqLLM(activeGroqKey, fullPrompt, false)
+      if (groqRes) return groqRes
     } catch (err: any) {
       console.warn('Groq chat failed:', err?.message || err)
     }
@@ -399,10 +446,10 @@ export async function generateQuiz(
   // 2. Try Gemini
   if (!text && activeGeminiKey) {
     try {
-      const genAI = new GoogleGenerativeAI(activeGeminiKey)
-      const model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' })
-      const result = await model.generateContent(prompt)
-      text = result.response.text()
+      const geminiResult = await callGeminiLLM(activeGeminiKey, prompt)
+      if (geminiResult?.text) {
+        text = geminiResult.text
+      }
     } catch (err: any) {
       console.warn('Gemini quiz failed, trying Groq:', err?.message || err)
     }
@@ -411,7 +458,7 @@ export async function generateQuiz(
   // 3. Try Groq
   if (!text && activeGroqKey) {
     try {
-      text = await callGroqLLM(activeGroqKey, prompt)
+      text = await callGroqLLM(activeGroqKey, prompt, true)
     } catch (e) {}
   }
 
@@ -432,3 +479,4 @@ export async function generateQuiz(
 
   return safeJsonParse(text, fallbackQuiz)
 }
+
