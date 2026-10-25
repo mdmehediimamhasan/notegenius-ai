@@ -128,21 +128,12 @@ export async function POST(request: NextRequest) {
     let transcription: TranscriptionResult | null = null
     const providerErrors: string[] = []
 
-    // Use client-side transcript if provided (no buffer needed for transcription)
-    if (clientTranscript && clientTranscript.trim().length > 3) {
-      transcription = {
-        text: clientTranscript.trim(),
-        language: 'auto',
-        duration: 30,
-      }
-    }
-
     // Load buffer once — reused for Groq + Cloudinary upload
     const arrayBuffer = await audioFile.arrayBuffer()
     let buffer: Buffer | null = Buffer.from(arrayBuffer)
 
-    // Groq Whisper transcription
-    if ((!transcription || !transcription.text) && groqApiKey) {
+    // 1. Primary: Groq Whisper transcription (whisper-large-v3-turbo first)
+    if (groqApiKey) {
       const groqModels = ['whisper-large-v3-turbo', 'whisper-large-v3']
       for (const groqModel of groqModels) {
         if (transcription?.text) break
@@ -174,8 +165,18 @@ export async function POST(request: NextRequest) {
           providerErrors.push(`Groq (${groqModel}): ${msg}`)
         }
       }
-    } else if (!groqApiKey) {
+    } else {
       providerErrors.push('Groq: No API key configured. Add your Groq API key in Settings.')
+    }
+
+    // 2. Fallback: Use client-side transcript if Groq Whisper failed or no key
+    if ((!transcription || !transcription.text) && clientTranscript && clientTranscript.trim().length > 3) {
+      transcription = {
+        text: clientTranscript.trim(),
+        language: 'auto',
+        duration: 30,
+        transcribedBy: 'Browser Speech Recognition (Fallback)',
+      }
     }
 
     if (!transcription || !transcription.text || transcription.text.trim().length === 0) {

@@ -106,7 +106,7 @@ async function callGroqLLM(apiKey: string, prompt: string, isJson: boolean = fal
   const safePrompt = prompt.length > 5000 ? prompt.substring(0, 5000) + jsonSuffix : prompt
 
   // Models supported by Groq in order of priority
-  const groqModels = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b', 'qwen/qwen3.6-27b', 'groq/compound', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant']
+  const groqModels = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'qwen/qwen3.8-27b']
   
   for (const model of groqModels) {
     try {
@@ -167,12 +167,15 @@ async function callMistralLLM(apiKey: string, messages: any[], isJson: boolean =
 }
 
 async function callGeminiLLM(apiKey: string, prompt: string) {
-  const geminiModels = ['gemini-3.6-flash', 'gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-1.5-pro']
+  const geminiModels = ['gemini-3.6-flash', 'gemini-3.8-flash']
   const genAI = new GoogleGenerativeAI(apiKey)
   
   for (const modelName of geminiModels) {
     try {
-      const model = genAI.getGenerativeModel({ model: modelName })
+      const model = genAI.getGenerativeModel(
+        { model: modelName },
+        { timeout: 7000 }
+      )
       const result = await model.generateContent(prompt)
       const text = result.response.text()
       if (text && text.trim().length > 0) {
@@ -289,13 +292,13 @@ Formatting Rules:
   let text = ''
   let generatedBy = 'AI LLM Model'
 
-  // 1. Try Mistral AI
-  if (activeMistralKey) {
+  // 1. Try Groq first (ultra-fast 1-2s response: GPT-OSS / Qwen)
+  if (activeGroqKey) {
     try {
-      text = await callMistralLLM(activeMistralKey, [{ role: 'user', content: prompt }], false)
-      if (text) generatedBy = 'Mistral AI (Mistral Small)'
-    } catch (err: any) {
-      console.warn('Mistral generateNotes failed, trying Gemini/Groq fallback:', err?.message || err)
+      text = await callGroqLLM(activeGroqKey, prompt, false)
+      if (text) generatedBy = 'Groq AI'
+    } catch (groqErr: any) {
+      console.warn('Groq LLM failed, trying Gemini fallback:', groqErr?.message || groqErr)
     }
   }
 
@@ -308,21 +311,11 @@ Formatting Rules:
         generatedBy = geminiResult.modelName
       }
     } catch (err: any) {
-      console.warn('Gemini generateNotes failed:', err?.message || err)
+      console.warn('Gemini generateNotes fallback failed:', err?.message || err)
     }
   }
 
-  // 3. Try Groq fallback
-  if (!text && activeGroqKey) {
-    try {
-      text = await callGroqLLM(activeGroqKey, prompt, false)
-      if (text) generatedBy = 'Groq (GPT-OSS)'
-    } catch (groqErr: any) {
-      console.warn('Groq LLM fallback failed:', groqErr?.message || groqErr)
-    }
-  }
-
-  // 4. Try OpenRouter fallback
+  // 3. Try OpenRouter fallback
   if (!text && activeOpenRouterKey) {
     try {
       const openRouterResult = await callOpenRouterLLM(activeOpenRouterKey, [{ role: 'user', content: prompt }], false)
@@ -332,6 +325,16 @@ Formatting Rules:
       }
     } catch (orErr: any) {
       console.warn('OpenRouter LLM fallback failed:', orErr?.message || orErr)
+    }
+  }
+
+  // 4. Try Mistral AI fallback
+  if (!text && activeMistralKey) {
+    try {
+      text = await callMistralLLM(activeMistralKey, [{ role: 'user', content: prompt }], false)
+      if (text) generatedBy = 'Mistral AI'
+    } catch (err: any) {
+      console.warn('Mistral generateNotes failed:', err?.message || err)
     }
   }
 
@@ -380,7 +383,29 @@ ${formattedNotes}
   const activeGeminiKey = (geminiKey && geminiKey !== 'dummy_key') ? geminiKey : process.env.GEMINI_API_KEY
   const activeGroqKey = groqKey || process.env.GROQ_API_KEY
   
-  // 1. Try Mistral
+  // 1. Try Groq (ultra fast)
+  if (activeGroqKey) {
+    try {
+      const fullPrompt = `${systemWithNotes}\n\nUser: ${userMessage}\nAssistant:`
+      const groqRes = await callGroqLLM(activeGroqKey, fullPrompt, false)
+      if (groqRes) return groqRes
+    } catch (err: any) {
+      console.warn('Groq chat failed, trying Gemini:', err?.message || err)
+    }
+  }
+
+  // 2. Try Gemini fallback
+  if (activeGeminiKey) {
+    try {
+      const fullPrompt = `${systemWithNotes}\n\nUser: ${userMessage}\nAssistant:`
+      const geminiResult = await callGeminiLLM(activeGeminiKey, fullPrompt)
+      if (geminiResult?.text) return geminiResult.text
+    } catch (err: any) {
+      console.warn('Gemini chat failed, trying Mistral:', err?.message || err)
+    }
+  }
+
+  // 3. Try Mistral
   if (activeMistralKey) {
     try {
       return await callMistralLLM(activeMistralKey, [
@@ -389,29 +414,7 @@ ${formattedNotes}
         { role: 'user', content: userMessage }
       ], false)
     } catch (err: any) {
-      console.warn('Mistral chat failed, trying Gemini:', err?.message || err)
-    }
-  }
-
-  // 2. Try Gemini
-  if (activeGeminiKey) {
-    try {
-      const fullPrompt = `${systemWithNotes}\n\nUser: ${userMessage}\nAssistant:`
-      const geminiResult = await callGeminiLLM(activeGeminiKey, fullPrompt)
-      if (geminiResult?.text) return geminiResult.text
-    } catch (err: any) {
-      console.warn('Gemini chat failed, trying Groq:', err?.message || err)
-    }
-  }
-
-  // 3. Try Groq
-  if (activeGroqKey) {
-    try {
-      const fullPrompt = `${systemWithNotes}\n\nUser: ${userMessage}\nAssistant:`
-      const groqRes = await callGroqLLM(activeGroqKey, fullPrompt, false)
-      if (groqRes) return groqRes
-    } catch (err: any) {
-      console.warn('Groq chat failed:', err?.message || err)
+      console.warn('Mistral chat failed:', err?.message || err)
     }
   }
 
@@ -434,16 +437,14 @@ export async function generateQuiz(
   const activeGroqKey = groqKey || process.env.GROQ_API_KEY
   let text = ''
 
-  // 1. Try Mistral
-  if (activeMistralKey) {
+  // 1. Try Groq (fastest JSON generation)
+  if (activeGroqKey) {
     try {
-      text = await callMistralLLM(activeMistralKey, [{ role: 'user', content: prompt }], true)
-    } catch (err: any) {
-      console.warn('Mistral quiz generation failed, trying Gemini:', err?.message || err)
-    }
+      text = await callGroqLLM(activeGroqKey, prompt, true)
+    } catch (e) {}
   }
 
-  // 2. Try Gemini
+  // 2. Try Gemini fallback
   if (!text && activeGeminiKey) {
     try {
       const geminiResult = await callGeminiLLM(activeGeminiKey, prompt)
@@ -451,15 +452,17 @@ export async function generateQuiz(
         text = geminiResult.text
       }
     } catch (err: any) {
-      console.warn('Gemini quiz failed, trying Groq:', err?.message || err)
+      console.warn('Gemini quiz failed, trying Mistral:', err?.message || err)
     }
   }
 
-  // 3. Try Groq
-  if (!text && activeGroqKey) {
+  // 3. Try Mistral
+  if (!text && activeMistralKey) {
     try {
-      text = await callGroqLLM(activeGroqKey, prompt, true)
-    } catch (e) {}
+      text = await callMistralLLM(activeMistralKey, [{ role: 'user', content: prompt }], true)
+    } catch (err: any) {
+      console.warn('Mistral quiz generation failed:', err?.message || err)
+    }
   }
 
   const fallbackQuiz = type === 'mcq'
